@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021 Clifford Liu
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package net.dongliu.apk.parser.parser;
 
 import net.dongliu.apk.parser.bean.DexClass;
@@ -5,6 +21,7 @@ import net.dongliu.apk.parser.exception.ParserException;
 import net.dongliu.apk.parser.struct.StringPool;
 import net.dongliu.apk.parser.struct.dex.DexClassStruct;
 import net.dongliu.apk.parser.struct.dex.DexHeader;
+import net.dongliu.apk.parser.traverse.DexProcessor;
 import net.dongliu.apk.parser.utils.Buffers;
 
 import java.io.IOException;
@@ -20,22 +37,24 @@ import java.nio.ByteOrder;
  *
  * @author dongliu
  */
-public class DexParser {
-
-    private ByteBuffer buffer;
+public class DexParser extends DexProcessor {
 
     private static final int NO_INDEX = 0xffffffff;
+
+    private DexHeader header;
+    private DexClassStruct[] dexClassStructs;
+    private String[] types;
 
     public DexParser(ByteBuffer buffer) {
         this.buffer = buffer.duplicate();
         this.buffer.order(ByteOrder.LITTLE_ENDIAN);
     }
 
-    public DexClass[] parse() {
+    public DexHeader processHeader() {
         // read magic
         String magic = new String(Buffers.readBytes(buffer, 8));
         if (!magic.startsWith("dex\n")) {
-            return new DexClass[0];
+            return null;
         }
         int version = Integer.parseInt(magic.substring(4, 7));
         // now the version is 035
@@ -44,10 +63,14 @@ public class DexParser {
             // and version 013 was used for the M5 releases of the Android platform (February–March 2008)
             throw new ParserException("Dex file version: " + version + " is not supported");
         }
-
         // read header
-        DexHeader header = readDexHeader();
+        header = readDexHeader();
         header.setVersion(version);
+        return header;
+    }
+
+    public void processClassTypes() {
+        if (header == null && processHeader() == null) return;
 
         // read string pool
         long[] stringOffsets = readStringPool(header.getStringIdsOff(), header.getStringIdsSize());
@@ -56,40 +79,103 @@ public class DexParser {
         int[] typeIds = readTypes(header.getTypeIdsOff(), header.getTypeIdsSize());
 
         // read classes
-        DexClassStruct[] dexClassStructs = readClass(header.getClassDefsOff(),
-                header.getClassDefsSize());
+        DexSection classSection = new DexSection(header.getClassDefsOff(), header.getClassDefsSize());
+        final DexClassStruct[] dexClassStructs = new DexClassStruct[classSection.getSize()];
+        this.dexClassStructs = dexClassStructs;
+        processSection(classSection, CLASS_STRUCT_PRODUCER, arrayConsumer(dexClassStructs));
 
         StringPool stringpool = readStrings(stringOffsets);
 
         String[] types = new String[typeIds.length];
+        this.types = types;
         for (int i = 0; i < typeIds.length; i++) {
             types[i] = stringpool.get(typeIds[i]);
         }
+    }
 
-        DexClass[] dexClasses = new DexClass[dexClassStructs.length];
-        for (int i = 0; i < dexClassStructs.length; i++) {
-            DexClassStruct dexClassStruct = dexClassStructs[i];
-            String superClass = null;
-            if (dexClassStruct.getSuperclassIdx() != NO_INDEX) {
-                superClass = types[dexClassStruct.getSuperclassIdx()];
-            }
-            dexClasses[i] = new DexClass(
-                    types[dexClassStruct.getClassIdx()],
-                    superClass,
-                    dexClassStruct.getAccessFlags());
+    public DexClass[] parse() {
+        if (header == null && processHeader() == null) {
+            return new DexClass[0];
         }
+
+        processClassTypes();
+
+        DexSection dexClassSection = new DexSection(-1, dexClassStructs.length);
+        DexClass[] dexClasses = new DexClass[dexClassSection.getSize()];
+        processSection(dexClassSection, CLASS_PRODUCER, arrayConsumer(dexClasses));
         return dexClasses;
     }
+
+    public static final RecordProducer<DexClass> CLASS_PRODUCER = new RecordProducer<>() {
+        private DexParser parser;
+        private DexClassStruct[] dexClassStructs;
+        private String[] types;
+
+        private DexClass oneDexClass;
+        private int lastIndex;
+
+        @Override
+        protected boolean preProduce(DexProcessor processor, DexSection section) {
+            if (processor instanceof DexParser) {
+                parser = (DexParser) processor;
+                dexClassStructs = parser.dexClassStructs;
+                types = parser.types;
+                oneDexClass = new DexClass();
+                lastIndex = section.getSize() - 1;
+            }
+            // dexClassStructs and types must be filled in advance
+            return parser != null && dexClassStructs != null && types != null;
+        }
+
+        @Override
+        protected void postProduce(DexProcessor processor) {
+        }
+
+        @Override
+        protected DexClass produce(DexProcessor processor, DexSection section, int i) {
+            DexClassStruct dexClassStruct = dexClassStructs[i];
+            DexClass dexClass;
+            try {
+                dexClass = i == lastIndex ? oneDexClass : (DexClass) oneDexClass.clone();
+            } catch (CloneNotSupportedException ignored) {
+                dexClass = new DexClass();
+            }
+            int superclassIdx = dexClassStruct.getSuperclassIdx();
+            dexClass.setSuperClass(superclassIdx != NO_INDEX ? types[superclassIdx] : null);
+            dexClass.setClassType(types[dexClassStruct.getClassIdx()]);
+            dexClass.setAccessFlags(dexClassStruct.getAccessFlags());
+            return dexClass;
+        }
+    };
 
     /**
      * read class info.
      */
-    private DexClassStruct[] readClass(long classDefsOff, int classDefsSize) {
-        Buffers.position(buffer, classDefsOff);
+    public static final RecordProducer<DexClassStruct> CLASS_STRUCT_PRODUCER = new RecordProducer<>() {
+        private ByteBuffer buffer;
+        private DexClassStruct oneStruct;
+        private int lastIndex;
 
-        DexClassStruct[] dexClassStructs = new DexClassStruct[classDefsSize];
-        for (int i = 0; i < classDefsSize; i++) {
-            DexClassStruct dexClassStruct = new DexClassStruct();
+        @Override
+        protected boolean preProduce(DexProcessor processor, DexSection section) {
+            buffer = processor.getBuffer();
+            oneStruct = new DexClassStruct();
+            lastIndex = section.getSize() - 1;
+            return true;
+        }
+
+        @Override
+        protected void postProduce(DexProcessor processor) {
+        }
+
+        @Override
+        protected DexClassStruct produce(DexProcessor processor, DexSection section, int i) {
+            DexClassStruct dexClassStruct;
+            try {
+                dexClassStruct = i == lastIndex ? oneStruct : (DexClassStruct) oneStruct.clone();
+            } catch (CloneNotSupportedException ignored) {
+                dexClassStruct = new DexClassStruct();
+            }
             dexClassStruct.setClassIdx(buffer.getInt());
 
             dexClassStruct.setAccessFlags(buffer.getInt());
@@ -100,11 +186,10 @@ public class DexParser {
             dexClassStruct.setAnnotationsOff(Buffers.readUInt(buffer));
             dexClassStruct.setClassDataOff(Buffers.readUInt(buffer));
             dexClassStruct.setStaticValuesOff(Buffers.readUInt(buffer));
-            dexClassStructs[i] = dexClassStruct;
-        }
 
-        return dexClassStructs;
-    }
+            return dexClassStruct;
+        }
+    };
 
     /**
      * read types.
