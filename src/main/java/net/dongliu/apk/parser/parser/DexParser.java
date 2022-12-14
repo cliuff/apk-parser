@@ -1,19 +1,3 @@
-/*
- * Copyright 2021 Clifford Liu
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package net.dongliu.apk.parser.parser;
 
 import net.dongliu.apk.parser.bean.DexClass;
@@ -27,6 +11,9 @@ import net.dongliu.apk.parser.utils.Buffers;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Function;
 
 /**
  * parse dex file.
@@ -104,6 +91,31 @@ public class DexParser extends DexProcessor {
         DexClass[] dexClasses = new DexClass[dexClassSection.getSize()];
         processSection(dexClassSection, CLASS_PRODUCER, arrayConsumer(dexClasses));
         return dexClasses;
+    }
+
+    public <T> List<T> transform(Function<DexClass, T> transform) {
+        if (header == null && processHeader() == null) {
+            return new ArrayList<>();
+        }
+
+        processClassTypes();
+
+        DexSection dexClassSection = new DexSection(-1, dexClassStructs.length);
+        List<T> transformedList = new ArrayList<>(dexClassSection.getSize());
+        final RecordTransformer<DexClass, T> transformer = new RecordTransformer<>() {
+            @Override
+            public T transform(int index, DexClass data) {
+                return transform.apply(data);
+            }
+
+            @Override
+            public boolean consume(int index, T data) {
+                transformedList.add(index, data);
+                return true;
+            }
+        };
+        processSection(dexClassSection, CLASS_PRODUCER, transformer);
+        return transformedList;
     }
 
     public static final RecordProducer<DexClass> CLASS_PRODUCER = new RecordProducer<>() {

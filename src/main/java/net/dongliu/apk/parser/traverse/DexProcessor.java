@@ -1,19 +1,3 @@
-/*
- * Copyright 2021 Clifford Liu
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package net.dongliu.apk.parser.traverse;
 
 import net.dongliu.apk.parser.utils.Buffers;
@@ -50,6 +34,10 @@ public abstract class DexProcessor {
         boolean consume(int index, T data);
     }
 
+    public interface RecordTransformer<T, R> extends RecordConsumer<R> {
+        R transform(int index, T data);
+    }
+
     public static <T> RecordConsumer<T> arrayConsumer(final T[] array) {
         return (index, data) -> {
             array[index] = data;
@@ -71,6 +59,21 @@ public abstract class DexProcessor {
             for (int i = 0; i < section.getSize(); i++) {
                 T product = producer.produce(this, section, i);
                 boolean terminate = !consumer.consume(i, product);
+                if (terminate) break;
+            }
+        }
+        producer.postProduce(this);
+    }
+
+    public <T, R> void processSection(DexSection section, RecordProducer<T> producer, RecordTransformer<T, R> transformer) {
+        if (section.getPosition() > -1) {
+            Buffers.position(buffer, section.getPosition());
+        }
+        if (producer.preProduce(this, section)) {
+            for (int i = 0; i < section.getSize(); i++) {
+                T product = producer.produce(this, section, i);
+                R transformed = transformer.transform(i, product);
+                boolean terminate = !transformer.consume(i, transformed);
                 if (terminate) break;
             }
         }
