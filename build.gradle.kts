@@ -17,6 +17,7 @@
 
 plugins {
     java
+    kotlin("jvm")
 }
 
 repositories {
@@ -35,3 +36,4 @@ version = "2.6.10-cliuff"
 description = "apk-parser"
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
+kotlin.jvmToolchain(11)
