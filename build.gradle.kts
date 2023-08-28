@@ -34,6 +34,6 @@ dependencies {
 group = "net.dongliu"
 version = "2.6.10-cliuff"
 description = "apk-parser"
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
-kotlin.jvmToolchain(11)
+java.sourceCompatibility = JavaVersion.VERSION_17
+java.targetCompatibility = JavaVersion.VERSION_17
+kotlin.jvmToolchain(17)
