@@ -34,10 +34,6 @@ public abstract class DexProcessor {
         boolean consume(int index, T data);
     }
 
-    public interface RecordTransformer<T, R> extends RecordConsumer<R> {
-        R transform(int index, T data);
-    }
-
     public static <T> RecordConsumer<T> arrayConsumer(final T[] array) {
         return (index, data) -> {
             array[index] = data;
@@ -59,21 +55,6 @@ public abstract class DexProcessor {
             for (int i = 0; i < section.getSize(); i++) {
                 T product = producer.produce(this, section, i);
                 boolean terminate = !consumer.consume(i, product);
-                if (terminate) break;
-            }
-        }
-        producer.postProduce(this);
-    }
-
-    public <T, R> void processSection(DexSection section, RecordProducer<T> producer, RecordTransformer<T, R> transformer) {
-        if (section.getPosition() > -1) {
-            Buffers.position(buffer, section.getPosition());
-        }
-        if (producer.preProduce(this, section)) {
-            for (int i = 0; i < section.getSize(); i++) {
-                T product = producer.produce(this, section, i);
-                R transformed = transformer.transform(i, product);
-                boolean terminate = !transformer.consume(i, transformed);
                 if (terminate) break;
             }
         }

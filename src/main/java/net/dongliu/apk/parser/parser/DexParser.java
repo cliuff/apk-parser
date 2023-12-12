@@ -11,9 +11,6 @@ import net.dongliu.apk.parser.utils.Buffers;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Function;
 
 /**
  * parse dex file.
@@ -91,31 +88,6 @@ public class DexParser extends DexProcessor {
         DexClass[] dexClasses = new DexClass[dexClassSection.getSize()];
         processSection(dexClassSection, CLASS_PRODUCER, arrayConsumer(dexClasses));
         return dexClasses;
-    }
-
-    public <T> List<T> transform(Function<DexClass, T> transform) {
-        if (header == null && processHeader() == null) {
-            return new ArrayList<>();
-        }
-
-        processClassTypes();
-
-        DexSection dexClassSection = new DexSection(-1, dexClassStructs.length);
-        List<T> transformedList = new ArrayList<>(dexClassSection.getSize());
-        final RecordTransformer<DexClass, T> transformer = new RecordTransformer<>() {
-            @Override
-            public T transform(int index, DexClass data) {
-                return transform.apply(data);
-            }
-
-            @Override
-            public boolean consume(int index, T data) {
-                transformedList.add(index, data);
-                return true;
-            }
-        };
-        processSection(dexClassSection, CLASS_PRODUCER, transformer);
-        return transformedList;
     }
 
     public static final RecordProducer<DexClass> CLASS_PRODUCER = new RecordProducer<>() {
