@@ -1,6 +1,6 @@
 plugins {
     java
-    kotlin("jvm")
+    kotlin("jvm") version("1.9.20")
 }
 
 dependencies {
@@ -16,3 +16,7 @@ description = "apk-parser"
 java.sourceCompatibility = JavaVersion.VERSION_17
 java.targetCompatibility = JavaVersion.VERSION_17
 kotlin.jvmToolchain(17)
+
+tasks.jar.configure {
+    manifest.attributes("Main-Class" to "net.dongliu.apk.parser.Main")
+}
